@@ -111,6 +111,16 @@ fn test_wrap_text_modes() {
 
     ----- stderr -----
     ");
+    typstyle_cmd_snapshot!(space.cli().args(["-c=34", "--wrap-text=fill-sentence"]).pass_stdin(stdin), @r"
+    success: true
+    exit_code: 0
+    ----- stdout -----
+    First sentence has extra spaces
+    and enough words to wrap.
+    Second sentence follows.
+
+    ----- stderr -----
+    ");
 }
 
 #[test]
