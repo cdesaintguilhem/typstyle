@@ -3,28 +3,42 @@ use typst_syntax::{SyntaxKind, SyntaxNode, ast::*};
 
 use super::{MarkupLine, MarkupRepr};
 use crate::pretty::{
-    Context, PrettyPrinter, prelude::*, text::is_enum_marker, util::is_comment_node,
+    Context, PrettyPrinter,
+    prelude::*,
+    text::{is_enum_marker, wrap_text},
+    util::is_comment_node,
 };
 
 impl<'a> PrettyPrinter<'a> {
     /// With text-wrapping enabled, spaces may turn to linebreaks, and linebreaks may turn to spaces, if safe.
-    pub(super) fn convert_markup_body_reflow(
+    ///
+    /// When `sentence_breaks` is set, sentence boundaries additionally become hardlines, so each
+    /// sentence starts on its own line while long sentences still wrap to the line width.
+    pub(super) fn convert_markup_body_wrapped(
         &'a self,
         ctx: Context,
         repr: &MarkupRepr<'a>,
+        sentence_breaks: bool,
     ) -> ArenaDoc<'a> {
+        let segmenter = sentence_breaks.then(|| SentenceSegmenter::new(Default::default()));
+
         let mut doc = self.arena.nil();
+        let mut pending_sentence_break = false;
         for (i, line) in repr.lines.iter().enumerate() {
             let &MarkupLine {
                 ref nodes, breaks, ..
             } = line;
             for (j, node) in nodes.iter().enumerate() {
-                doc += if node.kind() == SyntaxKind::Space {
-                    if nodes
+                if node.kind() == SyntaxKind::Space {
+                    doc += if nodes
                         .get(j + 1)
                         .is_some_and(|node| cannot_break_before_markup(node))
                     {
+                        pending_sentence_break = false;
                         self.arena.space()
+                    } else if pending_sentence_break {
+                        pending_sentence_break = false;
+                        self.arena.hardline()
                     } else if nodes
                         .get(j + 1)
                         .is_some_and(|node| reflow_prefers_exclusive(node))
@@ -35,20 +49,49 @@ impl<'a> PrettyPrinter<'a> {
                         self.arena.hardline()
                     } else {
                         self.arena.softline()
+                    };
+                    continue;
+                }
+
+                // A closing quote stays glued to the sentence it terminates, so the pending break
+                // survives until the following whitespace.
+                let defer_break = sentence_breaks && is_sentence_closer(node);
+                let leading_break = if pending_sentence_break && !defer_break {
+                    self.arena.hardline()
+                } else {
+                    self.arena.nil()
+                };
+
+                let node_doc = if let Some(text) = node.cast::<Text>() {
+                    if let Some(segmenter) = &segmenter {
+                        let (text_doc, ended_sentence) =
+                            convert_text_sentence_split(&self.arena, segmenter, text, true);
+                        pending_sentence_break = ended_sentence;
+                        text_doc
+                    } else {
+                        self.convert_text_wrapped(text)
                     }
-                } else if let Some(text) = node.cast::<Text>() {
-                    self.convert_text_wrapped(text)
                 } else if let Some(expr) = node.cast::<Expr>() {
+                    if !defer_break {
+                        pending_sentence_break =
+                            sentence_breaks && inline_node_ends_with_sentence(node);
+                    }
                     self.convert_expr(ctx, expr)
                 } else if is_comment_node(node) {
+                    pending_sentence_break = false;
                     self.convert_comment(ctx, node)
                 } else {
                     // can be Hash, Semicolon, Shebang
+                    pending_sentence_break =
+                        sentence_breaks && inline_node_ends_with_sentence(node);
                     self.convert_trivia_untyped(node)
                 };
+
+                doc += leading_break + node_doc;
             }
             // Should not eat trailing parbreaks.
             if breaks == 1
+                && !pending_sentence_break
                 && i + 1 != repr.lines.len()
                 && !nodes.last().is_some_and(|last| {
                     reflow_should_break_after(last) || reflow_preserve_break_after(last)
@@ -59,6 +102,7 @@ impl<'a> PrettyPrinter<'a> {
                 doc += self.arena.softline();
             } else if breaks > 0 {
                 doc += self.arena.hardline().repeat(breaks);
+                pending_sentence_break = false;
             }
         }
         doc
@@ -93,7 +137,7 @@ impl<'a> PrettyPrinter<'a> {
                     }
                 } else if let Some(text) = node.cast::<Text>() {
                     let (text_doc, ended_sentence) =
-                        convert_text_sentence_per_line(&self.arena, &segmenter, text);
+                        convert_text_sentence_split(&self.arena, &segmenter, text, false);
                     let leading_break = if pending_sentence_break {
                         self.arena.hardline()
                     } else {
@@ -136,10 +180,13 @@ impl<'a> PrettyPrinter<'a> {
 
 // Text conversion helper.
 
-fn convert_text_sentence_per_line<'a>(
+/// Splits `text` at sentence boundaries. With `fill`, each sentence additionally soft-wraps
+/// between words. Returns the doc and whether the text ends a sentence.
+fn convert_text_sentence_split<'a>(
     arena: &'a Arena<'a>,
     segmenter: &SentenceSegmenterBorrowed,
     text: Text<'a>,
+    fill: bool,
 ) -> (ArenaDoc<'a>, bool) {
     let text = text.get();
     let mut boundaries = segmenter.segment_str(text);
@@ -155,15 +202,21 @@ fn convert_text_sentence_per_line<'a>(
         let sentence = text[start..end].trim();
         if !sentence.is_empty() {
             if !first {
-                doc += if previous_was_abbreviation || cannot_break_before_text(sentence) {
+                doc += if cannot_break_before_text(sentence) {
                     arena.space()
+                } else if previous_was_abbreviation {
+                    if fill { arena.softline() } else { arena.space() }
                 } else {
                     arena.hardline()
                 };
             }
-            doc += arena.text(sentence);
+            doc += if fill {
+                wrap_text(arena, sentence)
+            } else {
+                arena.text(sentence)
+            };
             if end == text.len() && text.ends_with(' ') {
-                doc += arena.space();
+                doc += if fill { arena.softline() } else { arena.space() };
             }
             first = false;
             previous_was_abbreviation = is_common_abbreviation(sentence);
