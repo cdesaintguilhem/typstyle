@@ -29,6 +29,8 @@ pub enum WrapMode {
     Fill,
     /// Place each sentence on its own line.
     Sentence,
+    /// Place each sentence on its own line, and wrap long sentences to the line width.
+    FillSentence,
 }
 
 impl Default for Config {

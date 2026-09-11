@@ -208,6 +208,7 @@ impl<'a> PrettyPrinter<'a> {
                 WrapMode::None => self.convert_markup_body(ctx, &repr),
                 WrapMode::Sentence => self.convert_markup_body_sentence_per_line(ctx, &repr),
                 WrapMode::Fill => self.convert_markup_body_wrapped(ctx, &repr, false),
+                WrapMode::FillSentence => self.convert_markup_body_wrapped(ctx, &repr, true),
             }
         };
 
