@@ -205,7 +205,11 @@ fn convert_text_sentence_split<'a>(
                 doc += if cannot_break_before_text(sentence) {
                     arena.space()
                 } else if previous_was_abbreviation {
-                    if fill { arena.softline() } else { arena.space() }
+                    if fill {
+                        arena.softline()
+                    } else {
+                        arena.space()
+                    }
                 } else {
                     arena.hardline()
                 };
@@ -216,7 +220,11 @@ fn convert_text_sentence_split<'a>(
                 arena.text(sentence)
             };
             if end == text.len() && text.ends_with(' ') {
-                doc += if fill { arena.softline() } else { arena.space() };
+                doc += if fill {
+                    arena.softline()
+                } else {
+                    arena.space()
+                };
             }
             first = false;
             previous_was_abbreviation = is_common_abbreviation(sentence);
@@ -401,6 +409,15 @@ mod tests {
         format_markup(input, Config::new().with_wrap_mode(WrapMode::Sentence))
     }
 
+    fn format_fill_sentences(input: &str, width: usize) -> String {
+        format_markup(
+            input,
+            Config::new()
+                .with_width(width)
+                .with_wrap_mode(WrapMode::FillSentence),
+        )
+    }
+
     #[test]
     fn fill_mode_preserves_multilevel_heading_marker() {
         assert_eq!(
@@ -467,5 +484,63 @@ mod tests {
     #[test]
     fn sentence_mode_carries_breaks_across_non_text_nodes() {
         assert_eq!(format_sentences("A.#foo Next."), "A.\n#foo Next.\n");
+    }
+
+    #[test]
+    fn fill_sentence_mode_splits_sentences_that_would_fit() {
+        assert_eq!(
+            format_fill_sentences("A short one. Another.", 80),
+            "A short one.\nAnother.\n"
+        );
+    }
+
+    #[test]
+    fn fill_sentence_mode_joins_mid_sentence_line_breaks() {
+        assert_eq!(
+            format_fill_sentences(
+                "A sentence broken\nacross lines. Next one\nalso broken.",
+                80
+            ),
+            "A sentence broken across lines.\nNext one also broken.\n"
+        );
+    }
+
+    #[test]
+    fn fill_sentence_mode_wraps_long_sentences_to_width() {
+        assert_eq!(
+            format_fill_sentences("aaa bbb ccc ddd eee fff. Next.", 15),
+            "aaa bbb ccc ddd\neee fff.\nNext.\n"
+        );
+    }
+
+    #[test]
+    fn fill_sentence_mode_preserves_paragraph_breaks() {
+        assert_eq!(
+            format_fill_sentences("One. Two.\n\nThree.", 80),
+            "One.\nTwo.\n\nThree.\n"
+        );
+    }
+
+    #[test]
+    fn fill_sentence_mode_preserves_line_sensitive_markup() {
+        for input in [
+            "A. - this is ordinary prose.",
+            "A. == this is ordinary prose.",
+            "A. 1. this is ordinary prose.",
+        ] {
+            assert_eq!(format_fill_sentences(input, 80), format!("{input}\n"));
+        }
+    }
+
+    #[test]
+    fn fill_sentence_mode_keeps_abbreviations_and_closing_quotes() {
+        assert_eq!(
+            format_fill_sentences("Smith et al. argue this. Next.", 80),
+            "Smith et al. argue this.\nNext.\n"
+        );
+        assert_eq!(
+            format_fill_sentences("\"Hello.\" World.", 80),
+            "\"Hello.\"\nWorld.\n"
+        );
     }
 }
