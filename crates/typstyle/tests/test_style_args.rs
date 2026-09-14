@@ -137,3 +137,20 @@ fn test_wrap_text_does_not_consume_input_path() {
     ----- stderr -----
     ");
 }
+
+#[test]
+fn test_wrap_text_rejects_invalid_value() {
+    let space = Workspace::new();
+
+    typstyle_cmd_snapshot!(space.cli().args(["--wrap-text=bogus"]).pass_stdin(""), @r"
+    success: false
+    exit_code: 2
+    ----- stdout -----
+
+    ----- stderr -----
+    error: invalid value 'bogus' for '--wrap-text[=<WRAP_TEXT>]'
+      [possible values: none, fill, sentence, fill-sentence]
+
+    For more information, try '--help'.
+    ");
+}

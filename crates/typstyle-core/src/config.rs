@@ -80,3 +80,21 @@ impl Config {
         self
     }
 }
+
+#[cfg(all(test, feature = "serde"))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn wrap_mode_serde_round_trips_through_kebab_case() {
+        for (mode, json) in [
+            (WrapMode::None, "\"none\""),
+            (WrapMode::Fill, "\"fill\""),
+            (WrapMode::Sentence, "\"sentence\""),
+            (WrapMode::FillSentence, "\"fill-sentence\""),
+        ] {
+            assert_eq!(serde_json::to_string(&mode).unwrap(), json);
+            assert_eq!(serde_json::from_str::<WrapMode>(json).unwrap(), mode);
+        }
+    }
+}
